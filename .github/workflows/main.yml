@@ -8,6 +8,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: ${{ runner.temp }}/android-sdk
+      JAVA_HOME: /opt/hostedtoolcache/jdk/11/x64
     steps:
       - uses: actions/checkout@v4
 
@@ -17,17 +20,40 @@ jobs:
           distribution: temurin
           java-version: '11'
 
-      - name: Set up Android SDK
-        uses: r0adkll/setup-android@v2
-        with:
-          api-levels: 31
-          build-tools: '31.0.0'
-          target: 31
-
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+
+      - name: Install Android command-line tools and SDK components
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip wget
+          SDK_ROOT="${ANDROID_SDK_ROOT}"
+          mkdir -p "$SDK_ROOT"
+          cd "$SDK_ROOT"
+          # Try known recent commandline-tools URLs; fallback if first fails
+          URL="https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip"
+          echo "Downloading Android command-line tools..."
+          if ! wget -q -O cmdline-tools.zip "$URL"; then
+            echo "Primary URL failed, trying fallback..."
+            wget -q -O cmdline-tools.zip "https://dl.google.com/android/repository/commandlinetools-linux-8512546_latest.zip"
+          fi
+          mkdir -p cmdline-tools
+          unzip -q cmdline-tools.zip -d cmdline-tools
+          # Ensure layout is cmdline-tools/latest/...
+          if [ -d cmdline-tools/cmdline-tools ]; then
+            mv cmdline-tools/cmdline-tools cmdline-tools/latest || true
+          else
+            mv cmdline-tools/* cmdline-tools/latest || true
+          fi
+          export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH"
+          # Install platform-tools, build-tools and platform; accept licenses
+          yes | "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-31" "build-tools;31.0.0"
+          # Add platform-tools to PATH for the rest of the job
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> $GITHUB_ENV
+          echo "PATH=$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH" >> $GITHUB_ENV
 
       - name: Install Cordova
         run: npm install -g cordova@10
